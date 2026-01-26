@@ -39,7 +39,7 @@ if not st.session_state['logged_in']:
 # Login ဝင်ပြီးမှ မြင်ရမယ့် Main App (TTS Code)
 # ==========================================
 
-st.title("🗣️ Multi-Language Text-to-Speech")
+st.title("Multi-Language Text-to-Speech")
 st.success(f"Welcome, {st.secrets['credentials']['username']}!")
 
 # Logout Button
@@ -94,3 +94,4 @@ if st.button("Generate Audio", type="primary"):
 
 if st.session_state['audio_data']:
     st.audio(st.session_state['audio_data'], format="audio/mp3")
+
