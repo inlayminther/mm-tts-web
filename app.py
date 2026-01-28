@@ -5,9 +5,10 @@ import tempfile
 import os
 import requests
 import json
+import base64
 
 # 1. Page Config
-st.set_page_config(page_title="Gemini API TTS", page_icon="🔑", layout="centered")
+st.set_page_config(page_title="Gemini Pro TTS (Unlimited)", page_icon="♾️", layout="centered")
 
 # --- Authentication ---
 if 'logged_in' not in st.session_state:
@@ -37,8 +38,8 @@ if not st.session_state['logged_in']:
 # Main App
 # ==========================================
 
-st.title("🔑 Gemini API Text-to-Speech")
-st.caption("Using API Key for Google Voices")
+st.title("♾️ Gemini Pro TTS (Unlimited Text)")
+st.caption("Auto-chunking enabled: 5000+ characters supported.")
 
 if st.button("Logout"):
     st.session_state['logged_in'] = False
@@ -49,7 +50,6 @@ VOICE_DATA = {
     "မြန်မာ (Myanmar)": [
         {"name": "Edge - Male (Thiha)", "id": "my-MM-ThihaNeural", "type": "edge"},
         {"name": "Edge - Female (Nilar)", "id": "my-MM-NilarNeural", "type": "edge"},
-        # API Key နဲ့ ခေါ်မယ့် AI အသံများ (Journey)
         {"name": "Gemini AI - Female (Expressive)", "id": "en-US-Journey-F", "type": "google_api", "lang": "en-US"},
         {"name": "Gemini AI - Male (Deep)", "id": "en-US-Journey-D", "type": "google_api", "lang": "en-US"},
     ],
@@ -77,60 +77,74 @@ if selected_voice_data["type"] == "edge":
 else:
     speed = 1.0
 
-text_input = st.text_area("စာရိုက်ထည့်ပါ:", height=150)
+text_input = st.text_area("စာရိုက်ထည့်ပါ:", height=200)
 
 # --- Functions ---
 
+# Helper: Split text into chunks < 4500 chars to avoid 5000 byte limit
+def split_text_smart(text, max_length=4000):
+    chunks = []
+    while len(text) > max_length:
+        # Find the last space within the limit to avoid cutting words
+        split_at = text.rfind(' ', 0, max_length)
+        if split_at == -1:  # No space found, hard cut
+            split_at = max_length
+        chunks.append(text[:split_at])
+        text = text[split_at:]
+    chunks.append(text)
+    return chunks
+
 # 1. Edge TTS
 async def generate_edge_tts(text, voice, rate_str):
+    # Edge TTS also handles long text better via stream, but let's send direct
     communicate = edge_tts.Communicate(text, voice, rate=rate_str) if rate_str != "+0%" else edge_tts.Communicate(text, voice)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_file:
         tmp_path = tmp_file.name
     await communicate.save(tmp_path)
     return tmp_path
 
-# 2. Google REST API (Using API Key)
+# 2. Google REST API (With Chunking Loop)
 def generate_google_api(text, voice_id, lang_code):
-    # Secrets check
     if "gemini_api_key" not in st.secrets:
         return None, "Error: 'gemini_api_key' not found in secrets.toml"
     
     api_key = st.secrets["gemini_api_key"]
-    
-    # Official Endpoint for Text-to-Speech
     url = f"https://texttospeech.googleapis.com/v1beta1/text:synthesize?key={api_key}"
-    
     headers = {"Content-Type": "application/json"}
+
+    # Step 1: Split Text
+    chunks = split_text_smart(text)
+    combined_audio = b""
     
-    data = {
-        "input": {"text": text},
-        "voice": {
-            "languageCode": lang_code,
-            "name": voice_id
-        },
-        "audioConfig": {
-            "audioEncoding": "MP3"
-        }
-    }
-    
-    try:
-        response = requests.post(url, headers=headers, json=data)
+    # Step 2: Loop through chunks
+    for i, chunk in enumerate(chunks):
+        if not chunk.strip(): continue # Skip empty chunks
         
-        if response.status_code == 200:
-            import base64
-            response_json = response.json()
-            # Audio Content ကို decode လုပ်ခြင်း
-            audio_content = base64.b64decode(response_json['audioContent'])
+        data = {
+            "input": {"text": chunk},
+            "voice": {"languageCode": lang_code, "name": voice_id},
+            "audioConfig": {"audioEncoding": "MP3"}
+        }
+        
+        try:
+            response = requests.post(url, headers=headers, json=data)
+            if response.status_code == 200:
+                response_json = response.json()
+                # Decode and append
+                combined_audio += base64.b64decode(response_json['audioContent'])
+            else:
+                return None, f"API Error (Chunk {i+1}): {response.text}"
+        except Exception as e:
+            return None, str(e)
             
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_file:
-                tmp_file.write(audio_content)
-                tmp_path = tmp_file.name
-            return tmp_path, None
-        else:
-            return None, f"API Error ({response.status_code}): {response.text}"
-            
-    except Exception as e:
-        return None, str(e)
+    # Step 3: Save Combined Audio
+    if combined_audio:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_file:
+            tmp_file.write(combined_audio)
+            tmp_path = tmp_file.name
+        return tmp_path, None
+    else:
+        return None, "No audio generated."
 
 # --- Generate Logic ---
 
@@ -138,7 +152,7 @@ if st.button("Generate Audio", type="primary"):
     if not text_input.strip():
         st.warning("စာရိုက်ထည့်ပါ")
     else:
-        with st.spinner("Processing..."):
+        with st.spinner("Processing large text..."):
             audio_path = None
             err = None
             
@@ -166,6 +180,6 @@ if st.button("Generate Audio", type="primary"):
 # --- Display ---
 if 'audio_data' in st.session_state and st.session_state['audio_data']:
     st.markdown("---")
-    st.success("Success!")
+    st.success("Success! အသံဖိုင်ရပါပြီ။")
     st.audio(st.session_state['audio_data'], format="audio/mp3")
     st.download_button("Download MP3", st.session_state['audio_data'], "audio.mp3", "audio/mp3")
