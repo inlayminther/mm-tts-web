@@ -7,7 +7,7 @@ import requests
 import json
 
 # 1. Page Config
-st.set_page_config(page_title="Gemini TTS (Fixed)", page_icon="🔧", layout="centered")
+st.set_page_config(page_title="Gemini API TTS", page_icon="🔑", layout="centered")
 
 # --- Authentication ---
 if 'logged_in' not in st.session_state:
@@ -37,25 +37,21 @@ if not st.session_state['logged_in']:
 # Main App
 # ==========================================
 
-st.title("🔧 Gemini TTS (Fixed Version)")
-st.caption("Using Google Cloud Standard API with API Key")
+st.title("🔑 Gemini API Text-to-Speech")
+st.caption("Using API Key for Google Voices")
 
 if st.button("Logout"):
     st.session_state['logged_in'] = False
     st.rerun()
 
-# --- Voice Data Configuration ---
-# Note: "Zephyr/Puck" တို့က Playground နာမည်တွေပါ
-# API မှာတော့ "Journey" ID တွေနဲ့ သုံးရပါတယ် (အသံတူတူပါပဲ)
+# --- Voice Data ---
 VOICE_DATA = {
     "မြန်မာ (Myanmar)": [
         {"name": "Edge - Male (Thiha)", "id": "my-MM-ThihaNeural", "type": "edge"},
         {"name": "Edge - Female (Nilar)", "id": "my-MM-NilarNeural", "type": "edge"},
-        
-        # --- Gemini Voices (Mapped to Journey) ---
+        # API Key နဲ့ ခေါ်မယ့် AI အသံများ (Journey)
         {"name": "Gemini AI - Female (Expressive)", "id": "en-US-Journey-F", "type": "google_api", "lang": "en-US"},
         {"name": "Gemini AI - Male (Deep)", "id": "en-US-Journey-D", "type": "google_api", "lang": "en-US"},
-        {"name": "Gemini AI - Female (Soft)", "id": "en-US-Journey-O", "type": "google_api", "lang": "en-US"}
     ],
     "အင်္ဂလိပ် (English - US)": [
         {"name": "Gemini AI - Female (Expressive)", "id": "en-US-Journey-F", "type": "google_api", "lang": "en-US"},
@@ -73,11 +69,9 @@ voice_names = [v["name"] for v in voice_options]
 selected_voice_name = st.selectbox("အသံ (Voice)", voice_names)
 selected_voice_data = next(item for item in voice_options if item["name"] == selected_voice_name)
 
-# Warning if using English AI for Myanmar
 if selected_language == "မြန်မာ (Myanmar)" and selected_voice_data["type"] == "google_api":
-    st.warning("⚠️ English AI ကို မြန်မာစာ ဖတ်ခိုင်းနေပါသည်။ 'Burglish' (ဥပမာ: Mingalarpar) ရိုက်လျှင် ပိုကောင်းပါသည်။")
+    st.warning("⚠️ English AI ကို မြန်မာစာ ဖတ်ခိုင်းနေပါသည်။ Burglish (Mingalarpar) သုံးလျှင် ပိုကောင်းပါသည်။")
 
-# Speed Slider (Edge Only)
 if selected_voice_data["type"] == "edge":
     speed = st.slider("Speed (Edge Only)", 0.5, 2.0, 1.0, 0.1)
 else:
@@ -96,13 +90,14 @@ async def generate_edge_tts(text, voice, rate_str):
     return tmp_path
 
 # 2. Google REST API (Using API Key)
-# ဒီနည်းက 404 မဖြစ်တော့ပါဘူး (Official Endpoint)
 def generate_google_api(text, voice_id, lang_code):
+    # Secrets check
     if "gemini_api_key" not in st.secrets:
-        return None, "API Key ပျောက်နေပါသည်။ secrets.toml ကို စစ်ပါ။"
+        return None, "Error: 'gemini_api_key' not found in secrets.toml"
     
     api_key = st.secrets["gemini_api_key"]
-    # Standard Google Cloud TTS Endpoint
+    
+    # Official Endpoint for Text-to-Speech
     url = f"https://texttospeech.googleapis.com/v1beta1/text:synthesize?key={api_key}"
     
     headers = {"Content-Type": "application/json"}
@@ -122,9 +117,9 @@ def generate_google_api(text, voice_id, lang_code):
         response = requests.post(url, headers=headers, json=data)
         
         if response.status_code == 200:
-            # Google returns base64 audio content
-            response_json = response.json()
             import base64
+            response_json = response.json()
+            # Audio Content ကို decode လုပ်ခြင်း
             audio_content = base64.b64decode(response_json['audioContent'])
             
             with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_file:
@@ -132,7 +127,7 @@ def generate_google_api(text, voice_id, lang_code):
                 tmp_path = tmp_file.name
             return tmp_path, None
         else:
-            return None, f"Google API Error ({response.status_code}): {response.text}"
+            return None, f"API Error ({response.status_code}): {response.text}"
             
     except Exception as e:
         return None, str(e)
@@ -143,11 +138,10 @@ if st.button("Generate Audio", type="primary"):
     if not text_input.strip():
         st.warning("စာရိုက်ထည့်ပါ")
     else:
-        with st.spinner("Creating Audio..."):
+        with st.spinner("Processing..."):
             audio_path = None
             err = None
             
-            # Type A: Edge TTS
             if selected_voice_data["type"] == "edge":
                 try:
                     pct = int((speed - 1) * 100)
@@ -156,7 +150,6 @@ if st.button("Generate Audio", type="primary"):
                     audio_path = asyncio.run(generate_edge_tts(text_input, selected_voice_data["id"], rate))
                 except Exception as e: err = str(e)
             
-            # Type B: Google API
             elif selected_voice_data["type"] == "google_api":
                 audio_path, err = generate_google_api(
                     text_input, 
