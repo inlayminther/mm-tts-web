@@ -1,28 +1,70 @@
 import streamlit as st
 import edge_tts
 import asyncio
-import tempfile
 import os
 
 # 1. Page Config
-st.set_page_config(page_title="Simple Edge TTS", page_icon="🎵", layout="centered")
+st.set_page_config(page_title="Secure Edge TTS", page_icon="🔒", layout="centered")
+
+# ==========================================
+# Authentication (Login System)
+# ==========================================
+
+# Login အခြေအနေကို စစ်ဆေးခြင်း
+if 'logged_in' not in st.session_state:
+    st.session_state['logged_in'] = False
+
+def check_login():
+    user = st.session_state.get('input_username', '')
+    pwd = st.session_state.get('input_password', '')
+    
+    # secrets.toml ထဲက credentials နဲ့ တိုက်စစ်ခြင်း
+    try:
+        if "credentials" in st.secrets and \
+           user == st.secrets["credentials"]["username"] and \
+           pwd == st.secrets["credentials"]["password"]:
+            st.session_state['logged_in'] = True
+            st.success("Login Success!")
+        else:
+            st.error("Username သို့မဟုတ် Password မှားနေပါသည်!")
+    except Exception as e:
+        st.error(f"Config Error: {e}")
+
+# အကယ်၍ Login မဝင်ရသေးရင် ဒီမှာပဲ ရပ်မယ်
+if not st.session_state['logged_in']:
+    st.title("🔐 Login Required")
+    st.caption("ကျေးဇူးပြု၍ လော့အင်ဝင်ပါ")
+    
+    st.text_input("Username", key="input_username")
+    st.text_input("Password", type="password", key="input_password")
+    st.button("Login", on_click=check_login)
+    st.stop() # ဒီအောက်က ကုဒ်တွေကို ဆက်မလုပ်ခိုင်းဘူး
+
+# ==========================================
+# Main App (Login ဝင်ပြီးမှ မြင်ရမည့်အပိုင်း)
+# ==========================================
 
 st.title("🎵 Simple Edge TTS")
-st.caption("No API Keys. Free & Unlimited. (Myanmar + English)")
+st.caption("Free & Unlimited (Myanmar + English)")
+
+# Logout Button
+if st.button("Log out 🔒"):
+    st.session_state['logged_in'] = False
+    st.rerun() # Refresh ပြန်လုပ်ပြီး Login စာမျက်နှာပြန်ပို့
+
+# --- Session State for Audio ---
+if 'audio_bytes' not in st.session_state:
+    st.session_state['audio_bytes'] = None
 
 # --- Voice Settings ---
-# ဘာသာစကား ရွေးချယ်ခြင်း
 language = st.radio("ဘာသာစကား (Language):", ["မြန်မာ (Myanmar)", "အင်္ဂလိပ် (English)"], horizontal=True)
 
-# အသံရွေးချယ်ခြင်း
 if language == "မြန်မာ (Myanmar)":
-    # မြန်မာအသံများ
     voice_options = {
         "Thiha (Male) - သီဟ": "my-MM-ThihaNeural",
         "Nilar (Female) - နီလာ": "my-MM-NilarNeural"
     }
 else:
-    # အင်္ဂလိပ်အသံများ
     voice_options = {
         "Aria (Female) - US": "en-US-AriaNeural",
         "Christopher (Male) - US": "en-US-ChristopherNeural",
@@ -36,16 +78,13 @@ selected_voice_name = st.selectbox("အသံရွေးပါ (Select Voice):"
 selected_voice_id = voice_options[selected_voice_name]
 
 # --- Speed Control ---
-# 0.5 (နှေး) မှ 2.0 (မြန်) အထိ
 speed = st.slider("အသံအမြန်နှုန်း (Speed):", min_value=0.5, max_value=2.0, value=1.0, step=0.1)
 
 # --- Text Input ---
 text_input = st.text_area("စာရိုက်ထည့်ပါ (Enter Text):", height=200, placeholder="ဒီမှာ စာရိုက်ပါ...")
 
-# --- Generation Logic ---
-
+# --- Logic ---
 async def generate_audio(text, voice, speed_val):
-    # Speed ကို Edge TTS နားလည်တဲ့ ပုံစံပြောင်းခြင်း (ဥပမာ: +50%, -10%)
     percentage = int((speed_val - 1) * 100)
     if percentage >= 0:
         rate_str = f"+{percentage}%"
@@ -54,43 +93,34 @@ async def generate_audio(text, voice, speed_val):
     
     communicate = edge_tts.Communicate(text, voice, rate=rate_str)
     
-    # Temp file သုံးပြီး သိမ်းခြင်း
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_file:
-        tmp_path = tmp_file.name
-        
-    await communicate.save(tmp_path)
-    return tmp_path
+    audio_data = b""
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            audio_data += chunk["data"]
+            
+    return audio_data
 
+# Generate Button
 if st.button("Generate Audio 🔊", type="primary"):
     if not text_input.strip():
-        st.warning("ကျေးဇူးပြု၍ စာရိုက်ထည့်ပါ (Please enter text).")
+        st.warning("စာရိုက်ထည့်ပါ...")
     else:
-        with st.spinner("အသံဖိုင် ထုတ်လုပ်နေသည် (Generating)..."):
+        with st.spinner("Generating..."):
             try:
-                # Run Async Function
-                audio_path = asyncio.run(generate_audio(text_input, selected_voice_id, speed))
-                
-                # Read file for Streamlit
-                with open(audio_path, "rb") as f:
-                    audio_bytes = f.read()
-                
-                # Display Audio Player
-                st.audio(audio_bytes, format="audio/mp3")
-                
-                # Download Button
-                st.download_button(
-                    label="Download MP3 📥",
-                    data=audio_bytes,
-                    file_name="tts_audio.mp3",
-                    mime="audio/mp3"
-                )
-                
-                # Clean up temp file
-                os.remove(audio_path)
-                
+                audio_data = asyncio.run(generate_audio(text_input, selected_voice_id, speed))
+                st.session_state['audio_bytes'] = audio_data
             except Exception as e:
                 st.error(f"Error: {e}")
 
-# Footer
-st.markdown("---")
-st.caption("Powered by Microsoft Edge TTS")
+# --- Display Result ---
+if st.session_state['audio_bytes']:
+    st.markdown("---")
+    st.success("Success! အသံဖိုင် ရပါပြီ။")
+    st.audio(st.session_state['audio_bytes'], format="audio/mp3")
+    st.download_button(
+        label="Download MP3 📥",
+        data=st.session_state['audio_bytes'],
+        file_name="tts_audio.mp3",
+        mime="audio/mp3",
+        key="download_btn"
+    )
