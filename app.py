@@ -3,14 +3,14 @@ import edge_tts
 import asyncio
 import tempfile
 import os
+import requests  # API လှမ်းခေါ်ရန်
 from google.cloud import texttospeech
 from google.oauth2 import service_account
-import google.generativeai as genai
 
 # 1. Page Config
-st.set_page_config(page_title="Pro TTS (Force Mode)", page_icon="🔥", layout="centered")
+st.set_page_config(page_title="Gemini 2.5 TTS App", page_icon="🤖", layout="centered")
 
-# --- Authentication Logic ---
+# --- Authentication ---
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
 
@@ -38,30 +38,31 @@ if not st.session_state['logged_in']:
 # Main App
 # ==========================================
 
-st.title("🔥 Pro TTS (Experimental)")
-st.caption("Using English AI Models to read Myanmar Text (Experimental)")
+st.title("🤖 Gemini 2.5 + Edge TTS")
+st.caption("Now supporting: Zephyr, Puck, Charon (via Gemini API)")
 
 if st.button("Logout"):
     st.session_state['logged_in'] = False
     st.rerun()
 
 # --- Voice Data Configuration ---
-# ဒီနေရာမှာ ပြင်ထားပါတယ် - မြန်မာအောက်မှာ English Journey တွေကို ထည့်လိုက်ပါတယ်
 VOICE_DATA = {
     "မြန်မာ (Myanmar)": [
-        # --- Native Myanmar Voices (အသံမှန်) ---
+        # --- Edge TTS (Native) ---
         {"name": "Edge - Male (Thiha)", "id": "my-MM-ThihaNeural", "type": "edge"},
         {"name": "Edge - Female (Nilar)", "id": "my-MM-NilarNeural", "type": "edge"},
         
-        # --- Gemini Journey (Forced English AI) ---
-        # lang_code ကို en-US ထားမှ Google က လက်ခံမှာမို့ en-US ပဲ ထားထားပါတယ်
-        {"name": "Gemini AI - Female (Expressive)", "id": "en-US-Journey-F", "type": "google_cloud", "lang_code": "en-US"},
-        {"name": "Gemini AI - Male (Deep)", "id": "en-US-Journey-D", "type": "google_cloud", "lang_code": "en-US"},
-        {"name": "Gemini AI - Female (Soft)", "id": "en-US-Journey-O", "type": "google_cloud", "lang_code": "en-US"}
+        # --- Gemini 2.5 Voices (AI Studio Voices) ---
+        # ဒါတွေက AI Studio မှာ မြင်ရတဲ့ အသံတွေပါ
+        {"name": "Gemini 2.5 - Puck (Upbeat)", "id": "Puck", "type": "gemini_api"},
+        {"name": "Gemini 2.5 - Charon (Deep)", "id": "Charon", "type": "gemini_api"},
+        {"name": "Gemini 2.5 - Zephyr (Bright)", "id": "Zephyr", "type": "gemini_api"},
+        {"name": "Gemini 2.5 - Fenrir (Excited)", "id": "Fenrir", "type": "gemini_api"},
+        {"name": "Gemini 2.5 - Kore (Firm)", "id": "Kore", "type": "gemini_api"}
     ],
     "အင်္ဂလိပ် (English - US)": [
-        {"name": "Gemini Journey - Female (Expressive)", "id": "en-US-Journey-F", "type": "google_cloud", "lang_code": "en-US"},
-        {"name": "Gemini Journey - Male (Deep)", "id": "en-US-Journey-D", "type": "google_cloud", "lang_code": "en-US"},
+        {"name": "Gemini 2.5 - Puck (Upbeat)", "id": "Puck", "type": "gemini_api"},
+        {"name": "Gemini 2.5 - Zephyr (Bright)", "id": "Zephyr", "type": "gemini_api"},
         {"name": "Edge - Female (Aria)", "id": "en-US-AriaNeural", "type": "edge"},
         {"name": "Edge - Male (Christopher)", "id": "en-US-ChristopherNeural", "type": "edge"}
     ]
@@ -70,15 +71,10 @@ VOICE_DATA = {
 # Settings UI
 st.subheader("Settings")
 selected_language = st.selectbox("ဘာသာစကား", list(VOICE_DATA.keys()))
-
 voice_options = VOICE_DATA[selected_language]
 voice_names = [v["name"] for v in voice_options]
 selected_voice_name = st.selectbox("အသံ (Voice)", voice_names)
 selected_voice_data = next(item for item in voice_options if item["name"] == selected_voice_name)
-
-# Warning Message for Experimental Voices
-if selected_language == "မြန်မာ (Myanmar)" and selected_voice_data["type"] == "google_cloud":
-    st.warning("⚠️ သတိပေးချက်: သင်သည် English AI ကို မြန်မာစာ ဖတ်ခိုင်းနေပါသည်။ 'Burglish' (ဥပမာ - Mingalarpar) ရိုက်ထည့်ပါက ပိုအဆင်ပြေနိုင်ပါသည်။")
 
 # Speed Slider (Edge Only)
 if selected_voice_data["type"] == "edge":
@@ -98,34 +94,38 @@ async def generate_edge_tts(text, voice, rate_str):
     await communicate.save(tmp_path)
     return tmp_path
 
-# 2. Google Cloud TTS (Journey)
-def generate_google_cloud(text, voice_name, lang_code):
-    if "gcp_service_account" not in st.secrets:
-        return None, "Google Cloud JSON missing!"
+# 2. Gemini API (Direct Request via OpenAI-Compatible Endpoint)
+# ဒီ Function က AI Studio က အသံတွေကို တိုက်ရိုက်ဆွဲထုတ်ပေးပါမယ်
+def generate_gemini_api(text, voice_id):
+    if "gemini_api_key" not in st.secrets:
+        return None, "Gemini API Key မရှိပါ။ secrets.toml တွင် ထည့်ပေးပါ။"
+    
+    api_key = st.secrets["gemini_api_key"]
+    # Google ၏ Speech Endpoint (OpenAI Compatible)
+    url = "https://generativelanguage.googleapis.com/v1beta/openai/audio/speech"
+    
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    
+    data = {
+        "model": "gemini-2.0-flash", # AI Studio သုံး Model
+        "input": text,
+        "voice": voice_id # Puck, Zephyr, etc.
+    }
+    
     try:
-        creds = service_account.Credentials.from_service_account_info(st.secrets["gcp_service_account"])
-        client = texttospeech.TextToSpeechClient(credentials=creds)
+        response = requests.post(url, headers=headers, json=data)
         
-        input_text = texttospeech.SynthesisInput(text=text)
-        
-        # Force Enable: Language Code ကို Dictionary ထဲကအတိုင်း (en-US) ပို့ပါမယ်
-        voice = texttospeech.VoiceSelectionParams(
-            language_code=lang_code, 
-            name=voice_name
-        )
-        
-        audio_config = texttospeech.AudioConfig(
-            audio_encoding=texttospeech.AudioEncoding.MP3
-        )
-
-        response = client.synthesize_speech(
-            input=input_text, voice=voice, audio_config=audio_config
-        )
-        
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_file:
-            tmp_file.write(response.audio_content)
-            tmp_path = tmp_file.name
-        return tmp_path, None
+        if response.status_code == 200:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_file:
+                tmp_file.write(response.content)
+                tmp_path = tmp_file.name
+            return tmp_path, None
+        else:
+            return None, f"API Error: {response.status_code} - {response.text}"
+            
     except Exception as e:
         return None, str(e)
 
@@ -148,12 +148,11 @@ if st.button("Generate Audio", type="primary"):
                     audio_path = asyncio.run(generate_edge_tts(text_input, selected_voice_data["id"], rate))
                 except Exception as e: err = str(e)
             
-            # Type B: Google Cloud (Journey)
-            elif selected_voice_data["type"] == "google_cloud":
-                audio_path, err = generate_google_cloud(
+            # Type B: Gemini API (AI Studio Voices)
+            elif selected_voice_data["type"] == "gemini_api":
+                audio_path, err = generate_gemini_api(
                     text_input, 
-                    selected_voice_data["id"], 
-                    selected_voice_data["lang_code"] # ဒီမှာ en-US ပါသွားပါလိမ့်မယ်
+                    selected_voice_data["id"]
                 )
 
             if err: st.error(err)
