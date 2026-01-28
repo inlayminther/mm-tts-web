@@ -8,7 +8,7 @@ import json
 import base64
 
 # 1. Page Config
-st.set_page_config(page_title="Gemini Pro TTS (Unlimited)", page_icon="♾️", layout="centered")
+st.set_page_config(page_title="Gemini TTS (Myanmar Fixed)", page_icon="🇲🇲", layout="centered")
 
 # --- Authentication ---
 if 'logged_in' not in st.session_state:
@@ -38,8 +38,8 @@ if not st.session_state['logged_in']:
 # Main App
 # ==========================================
 
-st.title("♾️ Gemini Pro TTS (Unlimited Text)")
-st.caption("Auto-chunking enabled: 5000+ characters supported.")
+st.title("🇲🇲 Gemini TTS (Myanmar Fixed)")
+st.caption("Supports long Myanmar text (Auto-split enabled)")
 
 if st.button("Logout"):
     st.session_state['logged_in'] = False
@@ -70,7 +70,7 @@ selected_voice_name = st.selectbox("အသံ (Voice)", voice_names)
 selected_voice_data = next(item for item in voice_options if item["name"] == selected_voice_name)
 
 if selected_language == "မြန်မာ (Myanmar)" and selected_voice_data["type"] == "google_api":
-    st.warning("⚠️ English AI ကို မြန်မာစာ ဖတ်ခိုင်းနေပါသည်။ Burglish (Mingalarpar) သုံးလျှင် ပိုကောင်းပါသည်။")
+    st.warning("⚠️ English AI (Gemini) ကို မြန်မာစာ ဖတ်ခိုင်းနေပါသည်။")
 
 if selected_voice_data["type"] == "edge":
     speed = st.slider("Speed (Edge Only)", 0.5, 2.0, 1.0, 0.1)
@@ -81,14 +81,22 @@ text_input = st.text_area("စာရိုက်ထည့်ပါ:", height=200
 
 # --- Functions ---
 
-# Helper: Split text into chunks < 4500 chars to avoid 5000 byte limit
-def split_text_smart(text, max_length=4000):
+# Helper: Split text safely for Myanmar (Bytes vs Chars fix)
+# 500 characters limit is safe (500 chars * 3 bytes = 1500 bytes < 5000 limit)
+def split_text_safe(text, max_length=500):
     chunks = []
     while len(text) > max_length:
-        # Find the last space within the limit to avoid cutting words
-        split_at = text.rfind(' ', 0, max_length)
-        if split_at == -1:  # No space found, hard cut
+        # Try splitting by Myanmar punctuation first (။)
+        split_at = text.rfind('။', 0, max_length)
+        if split_at == -1:
+            # Try splitting by space
+            split_at = text.rfind(' ', 0, max_length)
+        
+        if split_at == -1:  # No good split point found, hard cut
             split_at = max_length
+        else:
+            split_at += 1 # Include the punctuation/space
+            
         chunks.append(text[:split_at])
         text = text[split_at:]
     chunks.append(text)
@@ -96,14 +104,13 @@ def split_text_smart(text, max_length=4000):
 
 # 1. Edge TTS
 async def generate_edge_tts(text, voice, rate_str):
-    # Edge TTS also handles long text better via stream, but let's send direct
     communicate = edge_tts.Communicate(text, voice, rate=rate_str) if rate_str != "+0%" else edge_tts.Communicate(text, voice)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_file:
         tmp_path = tmp_file.name
     await communicate.save(tmp_path)
     return tmp_path
 
-# 2. Google REST API (With Chunking Loop)
+# 2. Google REST API (Chunked Loop)
 def generate_google_api(text, voice_id, lang_code):
     if "gemini_api_key" not in st.secrets:
         return None, "Error: 'gemini_api_key' not found in secrets.toml"
@@ -112,13 +119,13 @@ def generate_google_api(text, voice_id, lang_code):
     url = f"https://texttospeech.googleapis.com/v1beta1/text:synthesize?key={api_key}"
     headers = {"Content-Type": "application/json"}
 
-    # Step 1: Split Text
-    chunks = split_text_smart(text)
+    # Step 1: Split Text (Using safer limit: 500 chars)
+    chunks = split_text_safe(text)
     combined_audio = b""
     
-    # Step 2: Loop through chunks
+    # Step 2: Loop chunks
     for i, chunk in enumerate(chunks):
-        if not chunk.strip(): continue # Skip empty chunks
+        if not chunk.strip(): continue
         
         data = {
             "input": {"text": chunk},
@@ -130,14 +137,13 @@ def generate_google_api(text, voice_id, lang_code):
             response = requests.post(url, headers=headers, json=data)
             if response.status_code == 200:
                 response_json = response.json()
-                # Decode and append
                 combined_audio += base64.b64decode(response_json['audioContent'])
             else:
-                return None, f"API Error (Chunk {i+1}): {response.text}"
+                return None, f"API Error in part {i+1}: {response.text}"
         except Exception as e:
             return None, str(e)
             
-    # Step 3: Save Combined Audio
+    # Step 3: Save Combined
     if combined_audio:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_file:
             tmp_file.write(combined_audio)
@@ -180,6 +186,6 @@ if st.button("Generate Audio", type="primary"):
 # --- Display ---
 if 'audio_data' in st.session_state and st.session_state['audio_data']:
     st.markdown("---")
-    st.success("Success! အသံဖိုင်ရပါပြီ။")
+    st.success("Success!")
     st.audio(st.session_state['audio_data'], format="audio/mp3")
     st.download_button("Download MP3", st.session_state['audio_data'], "audio.mp3", "audio/mp3")
