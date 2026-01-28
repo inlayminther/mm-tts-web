@@ -14,18 +14,20 @@ if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
 
 def check_login():
-    user = st.session_state['input_username']
-    pwd = st.session_state['input_password']
+    user = st.session_state.get('input_username', '')
+    pwd = st.session_state.get('input_password', '')
     
     # st.secrets မှ password နှင့် တိုက်စစ်ခြင်း
     try:
-        if user == st.secrets["credentials"]["username"] and \
+        # Credentials ရှိမရှိ အရင်စစ်မယ်
+        if "credentials" in st.secrets and \
+           user == st.secrets["credentials"]["username"] and \
            pwd == st.secrets["credentials"]["password"]:
             st.session_state['logged_in'] = True
         else:
             st.error("Username သို့မဟုတ် Password မှားယွင်းနေပါတယ်!")
-    except Exception:
-        st.error("Secrets မသတ်မှတ်ရသေးပါ (Please configure st.secrets)")
+    except Exception as e:
+        st.error(f"Error: {e}. Secrets မသတ်မှတ်ရသေးပါ (Please configure st.secrets)")
 
 # Login မဝင်ရသေးရင် Login Form ပြမယ်
 if not st.session_state['logged_in']:
@@ -39,8 +41,14 @@ if not st.session_state['logged_in']:
 # Login ဝင်ပြီးမှ မြင်ရမယ့် Main App (TTS Code)
 # ==========================================
 
-st.title("Multi-Language Text-to-Speech")
-st.success(f"Welcome, {st.secrets['credentials']['username']}!")
+st.title("🗣️ Multi-Language Text-to-Speech")
+
+# User Greeting
+try:
+    username_display = st.secrets['credentials']['username']
+except:
+    username_display = "User"
+st.success(f"Welcome, {username_display}!")
 
 # Logout Button
 if st.button("Logout"):
@@ -92,6 +100,18 @@ if st.button("Generate Audio", type="primary"):
             except Exception as e:
                 st.error(f"Error: {e}")
 
+# --- Result & Download Section ---
 if st.session_state['audio_data']:
+    st.markdown("---")
+    st.success("အသံဖိုင် ရပါပြီ!")
+    
+    # Audio Player
     st.audio(st.session_state['audio_data'], format="audio/mp3")
-
+    
+    # Download Button (ဒီခလုတ်ကမှ .mp3 နဲ့ အမှန် ဒေါင်းပေးမှာပါ)
+    st.download_button(
+        label="Download MP3 File",
+        data=st.session_state['audio_data'],
+        file_name="tts_audio.mp3",
+        mime="audio/mp3"
+    )
