@@ -18,6 +18,7 @@ def check_login():
     user = st.session_state.get('input_username', '')
     pwd = st.session_state.get('input_password', '')
     try:
+        # Secrets စစ်ဆေးခြင်း
         if "credentials" in st.secrets and \
            user == st.secrets["credentials"]["username"] and \
            pwd == st.secrets["credentials"]["password"]:
@@ -197,4 +198,12 @@ if st.button("Generate Audio", type="primary"):
 if 'audio_data' in st.session_state and st.session_state['audio_data']:
     st.markdown("---")
     st.success("Success! အသံဖိုင်ရပါပြီ။")
-    st.audio(st.
+    
+    st.audio(st.session_state['audio_data'], format="audio/mp3")
+    
+    st.download_button(
+        label="Download MP3",
+        data=st.session_state['audio_data'],
+        file_name="generated_audio.mp3",
+        mime="audio/mp3"
+    )
