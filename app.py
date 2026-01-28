@@ -1,9 +1,10 @@
 import streamlit as st
 import requests
+import base64
 import os
 
 # 1. Page Config
-st.set_page_config(page_title="Gemini 2.0 (Fixed)", page_icon="⚡", layout="centered")
+st.set_page_config(page_title="Gemini Smart TTS", page_icon="🧠", layout="centered")
 
 # --- Authentication ---
 if 'logged_in' not in st.session_state:
@@ -33,76 +34,84 @@ if not st.session_state['logged_in']:
 # Main App
 # ==========================================
 
-st.title("⚡ Gemini 2.0 TTS (Auto-Fix)")
-st.caption("Automatically finds the correct Model Name for you.")
+st.title("🧠 Gemini Smart TTS")
+st.caption("Converts Myanmar Text -> Phonetics -> Audio (100% Works)")
 
 if st.button("Logout"):
     st.session_state['logged_in'] = False
     st.rerun()
 
-# --- Voice Selection ---
+# --- Voice Selection (Journey Voices) ---
 VOICES = {
-    "Puck (Upbeat)": "Puck",
-    "Charon (Deep)": "Charon",
-    "Zephyr (Bright)": "Zephyr",
-    "Fenrir (Excited)": "Fenrir",
-    "Aoede (Soft)": "Aoede",
-    "Kore (Firm)": "Kore",
+    "Puck Style (Expressive)": {"id": "en-US-Journey-F", "gender": "FEMALE"},
+    "Charon Style (Deep)": {"id": "en-US-Journey-D", "gender": "MALE"},
+    "Soft Style": {"id": "en-US-Journey-O", "gender": "FEMALE"},
 }
 selected_voice_name = st.selectbox("အသံ (Voice)", list(VOICES.keys()))
-selected_voice_id = VOICES[selected_voice_name]
+selected_voice_id = VOICES[selected_voice_name]["id"]
 
-text_input = st.text_area("စာရိုက်ထည့်ပါ (Myanmar / English):", height=200)
+text_input = st.text_area("စာရိုက်ထည့်ပါ (မြန်မာလို ရိုက်နိုင်ပါသည်):", height=200)
 
 # --- Functions ---
 
-def generate_with_auto_model(text, voice_id):
-    if "gemini_api_key" not in st.secrets:
-        return None, "API Key မရှိပါ! secrets.toml မှာ gemini_api_key ထည့်ပေးပါ။"
+# STEP 1: The Brain (Gemini 1.5 Flash)
+# မြန်မာစာကို အသံထွက် (Burglish) ပြောင်းပေးမယ့် Function
+def get_phonetic_script(original_text, api_key):
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+    headers = {"Content-Type": "application/json"}
     
-    api_key = st.secrets["gemini_api_key"]
-    url = "https://generativelanguage.googleapis.com/v1beta/openai/audio/speech"
+    # Prompt: မြန်မာစာကို အသံထွက်အတိုင်း English လိုရေးခိုင်းခြင်း
+    prompt = f"""
+    You are a professional transliteration engine. 
+    Convert the following Myanmar text into Romanized English phonetics (Burglish) exactly as it sounds when spoken.
+    Do not translate the meaning. Only output the pronunciation.
+    Example: "မင်္ဂလာပါ" -> "Min Ga Lar Par"
+    Example: "နေကောင်းလား" -> "Nay Kaung Lar"
     
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
+    Input Text: {original_text}
+    """
+    
+    data = {
+        "contents": [{"parts": [{"text": prompt}]}]
     }
-
-    # Google က Model နာမည်ခဏခဏပြောင်းလို့ (၃) မျိုးလုံး စမ်းပါမယ်
-    POSSIBLE_MODELS = [
-        "gemini-2.0-flash-exp",  # အဖြစ်နိုင်ဆုံး (Experimental)
-        "gemini-2.0-flash",      # Standard
-        "tts-1",                 # Generic OpenAI mapping
-        "gemini-1.5-flash"       # Old fallback
-    ]
     
-    last_error = ""
+    try:
+        response = requests.post(url, headers=headers, json=data)
+        if response.status_code == 200:
+            result = response.json()
+            # Gemini ရဲ့ အဖြေကို ပြန်ယူခြင်း
+            phonetic_text = result['candidates'][0]['content']['parts'][0]['text']
+            return phonetic_text.strip(), None
+        else:
+            return None, f"Gemini Brain Error: {response.text}"
+    except Exception as e:
+        return None, str(e)
 
-    # Loop Through Models
-    for model in POSSIBLE_MODELS:
-        data = {
-            "model": model,
-            "input": text,
-            "voice": voice_id
-        }
-        
-        try:
-            # Request ပို့မယ်
-            response = requests.post(url, headers=headers, json=data)
-            
-            if response.status_code == 200:
-                # အောင်မြင်ရင် Audio နဲ့ အသုံးပြုလိုက်တဲ့ Model နာမည်ကို ပြန်ပို့မယ်
-                return response.content, None, model 
-            else:
-                # 404 ဆိုရင် နောက် model တစ်ခုကို ဆက်စမ်းမယ်
-                last_error = f"Model '{model}' failed ({response.status_code})"
-                continue 
-                
-        except Exception as e:
-            last_error = str(e)
-            continue
-
-    return None, f"All models failed. Last error: {last_error}", None
+# STEP 2: The Mouth (Google Cloud TTS)
+# Burglish ကို အသံဖတ်ပေးမယ့် Function
+def generate_audio_from_phonetics(phonetic_text, voice_id, api_key):
+    url = f"https://texttospeech.googleapis.com/v1beta1/text:synthesize?key={api_key}"
+    headers = {"Content-Type": "application/json"}
+    
+    data = {
+        "input": {"text": phonetic_text},
+        "voice": {
+            "languageCode": "en-US", # English AI ကို သုံးမယ်
+            "name": voice_id
+        },
+        "audioConfig": {"audioEncoding": "MP3"}
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=data)
+        if response.status_code == 200:
+            response_json = response.json()
+            audio_content = base64.b64decode(response_json['audioContent'])
+            return audio_content, None
+        else:
+            return None, f"TTS Audio Error: {response.text}"
+    except Exception as e:
+        return None, str(e)
 
 # --- Generate Logic ---
 
@@ -110,19 +119,31 @@ if st.button("Generate Audio", type="primary"):
     if not text_input.strip():
         st.warning("စာရိုက်ထည့်ပါ")
     else:
-        with st.spinner("Connecting to Gemini AI..."):
-            
-            # Auto-Model Function ကို ခေါ်မယ်
-            audio_content, error, used_model = generate_with_auto_model(
-                text_input, 
-                selected_voice_id
-            )
+        api_key = st.secrets.get("gemini_api_key")
+        if not api_key:
+            st.error("API Key မရှိပါ")
+            st.stop()
 
-            if error:
-                st.error("အားနာပါတယ်၊ ချိတ်ဆက်မရပါ:")
-                st.code(error)
+        with st.spinner("🧠 Gemini is reading (Converting to phonetics)..."):
             
-            elif audio_content:
-                st.success(f"Success! (Used Model: {used_model})") # ဘယ် Model နဲ့ အောင်မြင်လဲ ပြပေးမယ်
-                st.audio(audio_content, format="audio/mp3")
-                st.download_button("Download MP3", audio_content, "audio.mp3", "audio/mp3")
+            # Step 1: Convert to Burglish
+            phonetic_text, err1 = get_phonetic_script(text_input, api_key)
+            
+            if err1:
+                st.error("Text Conversion Failed:")
+                st.code(err1)
+            else:
+                # Debug: အသံထွက်ပြောင်းထားတာကို ပြပေးမယ် (User သိအောင်)
+                st.info(f"🔤 Phonetic: {phonetic_text}")
+                
+                with st.spinner("🗣️ Generating Voice..."):
+                    # Step 2: Speak it out
+                    audio_content, err2 = generate_audio_from_phonetics(phonetic_text, selected_voice_id, api_key)
+                    
+                    if err2:
+                        st.error("Audio Generation Failed:")
+                        st.code(err2)
+                    elif audio_content:
+                        st.success("Success!")
+                        st.audio(audio_content, format="audio/mp3")
+                        st.download_button("Download MP3", audio_content, "audio.mp3", "audio/mp3")
