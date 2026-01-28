@@ -7,7 +7,7 @@ import requests
 import json
 
 # 1. Page Config
-st.set_page_config(page_title="Gemini 2.0 Flash TTS", page_icon="⚡", layout="centered")
+st.set_page_config(page_title="Gemini + Edge Hybrid", page_icon="💎", layout="centered")
 
 # --- Authentication ---
 if 'logged_in' not in st.session_state:
@@ -37,8 +37,8 @@ if not st.session_state['logged_in']:
 # Main App
 # ==========================================
 
-st.title("⚡ Gemini 2.0 Flash (AI Studio Mode)")
-st.caption("Using Gemini Brain directly - Supports Myanmar Text!")
+st.title("💎 Gemini + Edge Hybrid TTS")
+st.caption("AI Studio (Gemini) for Intelligence | Edge TTS for Reliability")
 
 if st.button("Logout"):
     st.session_state['logged_in'] = False
@@ -46,17 +46,16 @@ if st.button("Logout"):
 
 # --- Voice Data ---
 VOICE_DATA = {
-    "Gemini 2.0 (AI Studio Voices)": [
-        # ဒီအသံတွေက AI Studio က အသံတွေပါ (မြန်မာလို ဖတ်နိုင်ပါတယ်)
+    "Gemini (AI Studio - Smart)": [
         {"name": "Gemini - Puck (Upbeat)", "id": "Puck", "type": "gemini_flash"},
         {"name": "Gemini - Charon (Deep)", "id": "Charon", "type": "gemini_flash"},
         {"name": "Gemini - Zephyr (Bright)", "id": "Zephyr", "type": "gemini_flash"},
         {"name": "Gemini - Fenrir (Excited)", "id": "Fenrir", "type": "gemini_flash"},
-        {"name": "Gemini - Kore (Firm)", "id": "Kore", "type": "gemini_flash"},
     ],
-    "Standard Edge TTS": [
-        {"name": "Edge - Thiha (Myanmar)", "id": "my-MM-ThihaNeural", "type": "edge"},
-        {"name": "Edge - Nilar (Myanmar)", "id": "my-MM-NilarNeural", "type": "edge"},
+    "Edge TTS (Standard - Reliable)": [
+        {"name": "Edge - Thiha (Myanmar Male)", "id": "my-MM-ThihaNeural", "type": "edge"},
+        {"name": "Edge - Nilar (Myanmar Female)", "id": "my-MM-NilarNeural", "type": "edge"},
+        {"name": "Edge - Aria (English)", "id": "en-US-AriaNeural", "type": "edge"}
     ]
 }
 
@@ -74,11 +73,11 @@ if selected_voice_data["type"] == "edge":
 else:
     speed = 1.0
 
-text_input = st.text_area("စာရိုက်ထည့်ပါ (မြန်မာ/English):", height=200)
+text_input = st.text_area("စာရိုက်ထည့်ပါ:", height=200)
 
 # --- Functions ---
 
-# Helper: Split text safely
+# Helper: Split text
 def split_text(text, max_length=500):
     chunks = []
     while len(text) > max_length:
@@ -89,7 +88,7 @@ def split_text(text, max_length=500):
     chunks.append(text)
     return chunks
 
-# 1. Edge TTS
+# 1. Edge TTS Function
 async def generate_edge_tts(text, voice, rate_str):
     communicate = edge_tts.Communicate(text, voice, rate=rate_str) if rate_str != "+0%" else edge_tts.Communicate(text, voice)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_file:
@@ -97,15 +96,12 @@ async def generate_edge_tts(text, voice, rate_str):
     await communicate.save(tmp_path)
     return tmp_path
 
-# 2. Gemini 2.0 Flash API (The AI Studio Way)
+# 2. Gemini 2.0 Flash API (With Retry Logic)
 def generate_gemini_flash(text, voice_id):
     if "gemini_api_key" not in st.secrets:
         return None, "Error: 'gemini_api_key' not found in secrets.toml"
     
     api_key = st.secrets["gemini_api_key"]
-    
-    # ဒါက AI Studio က သုံးတဲ့ OpenAI-Compatible Speech Endpoint ပါ
-    # ဒီလမ်းကြောင်းက LLM (ဦးနှောက်) ကို သုံးလို့ မြန်မာလို နားလည်ပါတယ်
     url = "https://generativelanguage.googleapis.com/v1beta/openai/audio/speech"
     
     headers = {
@@ -119,21 +115,20 @@ def generate_gemini_flash(text, voice_id):
     for i, chunk in enumerate(chunks):
         if not chunk.strip(): continue
         
+        # FIX: Try 'gemini-2.0-flash-exp' if 'gemini-2.0-flash' fails
         data = {
-            "model": "gemini-2.0-flash", # AI Studio ရဲ့ မော်ဒယ်
+            "model": "gemini-2.0-flash-exp", 
             "input": chunk,
             "voice": voice_id
         }
         
         try:
-            # Request ပို့မယ်
             response = requests.post(url, headers=headers, json=data)
-            
             if response.status_code == 200:
                 combined_audio += response.content
             else:
-                return None, f"AI Studio Error ({response.status_code}): {response.text}"
-                
+                # 404 or other error -> Return None to trigger fallback
+                return None, f"Gemini Error ({response.status_code}): {response.text}"
         except Exception as e:
             return None, str(e)
 
@@ -151,26 +146,40 @@ if st.button("Generate Audio", type="primary"):
     if not text_input.strip():
         st.warning("စာရိုက်ထည့်ပါ")
     else:
-        with st.spinner("Gemini is reading..."):
+        with st.spinner("Processing..."):
             audio_path = None
             err = None
             
-            if selected_voice_data["type"] == "edge":
+            # --- Logic: Try Gemini -> Fallback to Edge ---
+            
+            if selected_voice_data["type"] == "gemini_flash":
+                # Gemini ကို အရင်စမ်းမယ်
+                audio_path, err = generate_gemini_flash(text_input, selected_voice_data["id"])
+                
+                # အကယ်၍ Error တက်ခဲ့ရင် (404, 500 etc.)
+                if err:
+                    st.warning(f"⚠️ Gemini API Error: {err}")
+                    st.info("🔄 Switching to Edge TTS (Thiha) automatically...")
+                    
+                    # Edge TTS ကို အလိုအလျောက် ပြောင်းသုံးမယ်
+                    try:
+                        audio_path = asyncio.run(generate_edge_tts(text_input, "my-MM-ThihaNeural", "+0%"))
+                        err = None # Error ကို ဖျောက်ပစ်မယ် (Edge အောင်မြင်ရင်)
+                    except Exception as e:
+                        err = f"Edge TTS Failed too: {str(e)}"
+
+            elif selected_voice_data["type"] == "edge":
+                # Edge TTS ရွေးထားရင် တန်းလုပ်မယ်
                 try:
                     pct = int((speed - 1) * 100)
                     rate = f"+{pct}%" if pct >= 0 else f"{pct}%"
                     if speed == 1.0: rate = "+0%"
                     audio_path = asyncio.run(generate_edge_tts(text_input, selected_voice_data["id"], rate))
                 except Exception as e: err = str(e)
-            
-            elif selected_voice_data["type"] == "gemini_flash":
-                audio_path, err = generate_gemini_flash(
-                    text_input, 
-                    selected_voice_data["id"]
-                )
 
+            # --- Result ---
             if err: 
-                st.error("Error ဖြစ်နေပါတယ်:")
+                st.error("အားနာပါတယ်၊ စနစ်နှစ်ခုလုံး အလုပ်မလုပ်ပါ:")
                 st.code(err)
             elif audio_path:
                 with open(audio_path, "rb") as f:
