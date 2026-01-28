@@ -1,4 +1,6 @@
 streamlit
 edge-tts
 google-generativeai
+google-cloud-texttospeech
+requests
 
