@@ -9,7 +9,7 @@ import base64
 import re
 
 # 1. Page Config
-st.set_page_config(page_title="Gemini TTS (Final Fix)", page_icon="✅", layout="centered")
+st.set_page_config(page_title="AI Studio Direct", page_icon="⚡", layout="centered")
 
 # --- Authentication ---
 if 'logged_in' not in st.session_state:
@@ -39,8 +39,8 @@ if not st.session_state['logged_in']:
 # Main App
 # ==========================================
 
-st.title("✅ Gemini TTS (Sentence Fix)")
-st.caption("Splits long sentences automatically to avoid API errors.")
+st.title("⚡ AI Studio Direct Mode")
+st.caption("Using Gemini 2.0 Flash Model (Standard AI Studio Endpoint)")
 
 if st.button("Logout"):
     st.session_state['logged_in'] = False
@@ -48,30 +48,29 @@ if st.button("Logout"):
 
 # --- Voice Data ---
 VOICE_DATA = {
-    "မြန်မာ (Myanmar)": [
-        {"name": "Edge - Male (Thiha)", "id": "my-MM-ThihaNeural", "type": "edge"},
-        {"name": "Edge - Female (Nilar)", "id": "my-MM-NilarNeural", "type": "edge"},
-        {"name": "Gemini AI - Female (Expressive)", "id": "en-US-Journey-F", "type": "google_api", "lang": "en-US"},
-        {"name": "Gemini AI - Male (Deep)", "id": "en-US-Journey-D", "type": "google_api", "lang": "en-US"},
+    "AI Studio Voices (Gemini 2.0)": [
+        # AI Studio က အသံတွေပါ (မြန်မာလို စမ်းကြည့်နိုင်ပါပြီ)
+        {"name": "Gemini - Puck (Upbeat)", "id": "Puck", "type": "ai_studio"},
+        {"name": "Gemini - Charon (Deep)", "id": "Charon", "type": "ai_studio"},
+        {"name": "Gemini - Zephyr (Bright)", "id": "Zephyr", "type": "ai_studio"},
+        {"name": "Gemini - Fenrir (Excited)", "id": "Fenrir", "type": "ai_studio"},
+        {"name": "Gemini - Aoede (Soft)", "id": "Aoede", "type": "ai_studio"},
+        {"name": "Gemini - Kore (Firm)", "id": "Kore", "type": "ai_studio"},
     ],
-    "အင်္ဂလိပ် (English - US)": [
-        {"name": "Gemini AI - Female (Expressive)", "id": "en-US-Journey-F", "type": "google_api", "lang": "en-US"},
-        {"name": "Gemini AI - Male (Deep)", "id": "en-US-Journey-D", "type": "google_api", "lang": "en-US"},
-        {"name": "Edge - Female (Aria)", "id": "en-US-AriaNeural", "type": "edge"},
-        {"name": "Edge - Male (Christopher)", "id": "en-US-ChristopherNeural", "type": "edge"}
+    "Standard Voices": [
+        {"name": "Edge - Thiha (Myanmar)", "id": "my-MM-ThihaNeural", "type": "edge"},
+        {"name": "Edge - Nilar (Myanmar)", "id": "my-MM-NilarNeural", "type": "edge"},
+        {"name": "Edge - Aria (English)", "id": "en-US-AriaNeural", "type": "edge"}
     ]
 }
 
 # Settings UI
 st.subheader("Settings")
-selected_language = st.selectbox("ဘာသာစကား", list(VOICE_DATA.keys()))
-voice_options = VOICE_DATA[selected_language]
+selected_category = st.selectbox("အမျိုးအစား (Category)", list(VOICE_DATA.keys()))
+voice_options = VOICE_DATA[selected_category]
 voice_names = [v["name"] for v in voice_options]
 selected_voice_name = st.selectbox("အသံ (Voice)", voice_names)
 selected_voice_data = next(item for item in voice_options if item["name"] == selected_voice_name)
-
-if selected_language == "မြန်မာ (Myanmar)" and selected_voice_data["type"] == "google_api":
-    st.warning("⚠️ English AI (Gemini) ကို မြန်မာစာ ဖတ်ခိုင်းနေပါသည်။")
 
 if selected_voice_data["type"] == "edge":
     speed = st.slider("Speed (Edge Only)", 0.5, 2.0, 1.0, 0.1)
@@ -82,40 +81,15 @@ text_input = st.text_area("စာရိုက်ထည့်ပါ:", height=200
 
 # --- Functions ---
 
-# Helper: Aggressive splitter for Sentence Length Error
-# Reduces chunk size to 200 chars and prioritizes punctuation
-def split_text_aggressive(text, max_length=200):
+# Helper: Split text to stay safe
+def split_text_simple(text, max_length=500):
     chunks = []
     while len(text) > max_length:
-        # Priority 1: Burmese Punctuation (။)
-        split_at = text.rfind('။', 0, max_length)
-        
-        # Priority 2: Burmese Comma (၊)
-        if split_at == -1:
-            split_at = text.rfind('၊', 0, max_length)
-            
-        # Priority 3: English Sentence Enders (. ? !)
-        if split_at == -1:
-            # Simple regex search for last punctuation
-            match = re.search(r'[.?!]', text[:max_length][::-1])
-            if match:
-                split_at = max_length - match.start() - 1
-
-        # Priority 4: Space
-        if split_at == -1:
-            split_at = text.rfind(' ', 0, max_length)
-        
-        # Fallback: Hard cut if no punctuation found
-        if split_at == -1:
-            split_at = max_length
-        else:
-            split_at += 1 # Include the punctuation
-            
+        split_at = text.rfind(' ', 0, max_length)
+        if split_at == -1: split_at = max_length
         chunks.append(text[:split_at])
         text = text[split_at:]
-    
-    if text:
-        chunks.append(text)
+    chunks.append(text)
     return chunks
 
 # 1. Edge TTS
@@ -126,41 +100,44 @@ async def generate_edge_tts(text, voice, rate_str):
     await communicate.save(tmp_path)
     return tmp_path
 
-# 2. Google REST API (Chunked Loop)
-def generate_google_api(text, voice_id, lang_code):
+# 2. AI Studio Direct API (Generative Language)
+def generate_ai_studio(text, voice_id):
     if "gemini_api_key" not in st.secrets:
         return None, "Error: 'gemini_api_key' not found in secrets.toml"
     
     api_key = st.secrets["gemini_api_key"]
-    url = f"https://texttospeech.googleapis.com/v1beta1/text:synthesize?key={api_key}"
-    headers = {"Content-Type": "application/json"}
-
-    # Step 1: Split Text (Using aggressive limit: 200 chars)
-    chunks = split_text_aggressive(text)
-    combined_audio = b""
     
-    # Step 2: Loop chunks
+    # ဒါက AI Studio က သုံးတဲ့ OpenAI-Compatible Endpoint အစစ်ပါ
+    url = "https://generativelanguage.googleapis.com/v1beta/openai/audio/speech"
+    
+    headers = {
+        "Authorization": f"Bearer {api_key}", # Bearer Token သုံးပါတယ်
+        "Content-Type": "application/json"
+    }
+    
+    chunks = split_text_simple(text)
+    combined_audio = b""
+
     for i, chunk in enumerate(chunks):
         if not chunk.strip(): continue
         
         data = {
-            "input": {"text": chunk},
-            "voice": {"languageCode": lang_code, "name": voice_id},
-            "audioConfig": {"audioEncoding": "MP3"}
+            "model": "gemini-2.0-flash", # AI Studio ရဲ့ မော်ဒယ်
+            "input": chunk,
+            "voice": voice_id
         }
         
         try:
             response = requests.post(url, headers=headers, json=data)
+            
             if response.status_code == 200:
-                response_json = response.json()
-                combined_audio += base64.b64decode(response_json['audioContent'])
+                combined_audio += response.content # Direct Audio Content
             else:
-                # If chunk is still rejected, try one generic fallback
-                return None, f"Chunk {i+1} Error: {response.json().get('error', {}).get('message', 'Unknown Error')}"
+                return None, f"AI Studio Error: {response.text}"
+                
         except Exception as e:
             return None, str(e)
             
-    # Step 3: Save Combined
     if combined_audio:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_file:
             tmp_file.write(combined_audio)
@@ -175,7 +152,7 @@ if st.button("Generate Audio", type="primary"):
     if not text_input.strip():
         st.warning("စာရိုက်ထည့်ပါ")
     else:
-        with st.spinner("Processing text..."):
+        with st.spinner("Asking Gemini to read..."):
             audio_path = None
             err = None
             
@@ -187,11 +164,10 @@ if st.button("Generate Audio", type="primary"):
                     audio_path = asyncio.run(generate_edge_tts(text_input, selected_voice_data["id"], rate))
                 except Exception as e: err = str(e)
             
-            elif selected_voice_data["type"] == "google_api":
-                audio_path, err = generate_google_api(
+            elif selected_voice_data["type"] == "ai_studio":
+                audio_path, err = generate_ai_studio(
                     text_input, 
-                    selected_voice_data["id"],
-                    selected_voice_data["lang"]
+                    selected_voice_data["id"]
                 )
 
             if err: st.error(err)
