@@ -3,12 +3,11 @@ import edge_tts
 import asyncio
 import tempfile
 import os
-import requests  # API လှမ်းခေါ်ရန်
-from google.cloud import texttospeech
-from google.oauth2 import service_account
+import requests
+import json
 
 # 1. Page Config
-st.set_page_config(page_title="Gemini 2.5 TTS App", page_icon="🤖", layout="centered")
+st.set_page_config(page_title="Gemini TTS (Fixed)", page_icon="🔧", layout="centered")
 
 # --- Authentication ---
 if 'logged_in' not in st.session_state:
@@ -38,31 +37,29 @@ if not st.session_state['logged_in']:
 # Main App
 # ==========================================
 
-st.title("🤖 Gemini 2.5 + Edge TTS")
-st.caption("Now supporting: Zephyr, Puck, Charon (via Gemini API)")
+st.title("🔧 Gemini TTS (Fixed Version)")
+st.caption("Using Google Cloud Standard API with API Key")
 
 if st.button("Logout"):
     st.session_state['logged_in'] = False
     st.rerun()
 
 # --- Voice Data Configuration ---
+# Note: "Zephyr/Puck" တို့က Playground နာမည်တွေပါ
+# API မှာတော့ "Journey" ID တွေနဲ့ သုံးရပါတယ် (အသံတူတူပါပဲ)
 VOICE_DATA = {
     "မြန်မာ (Myanmar)": [
-        # --- Edge TTS (Native) ---
         {"name": "Edge - Male (Thiha)", "id": "my-MM-ThihaNeural", "type": "edge"},
         {"name": "Edge - Female (Nilar)", "id": "my-MM-NilarNeural", "type": "edge"},
         
-        # --- Gemini 2.5 Voices (AI Studio Voices) ---
-        # ဒါတွေက AI Studio မှာ မြင်ရတဲ့ အသံတွေပါ
-        {"name": "Gemini 2.5 - Puck (Upbeat)", "id": "Puck", "type": "gemini_api"},
-        {"name": "Gemini 2.5 - Charon (Deep)", "id": "Charon", "type": "gemini_api"},
-        {"name": "Gemini 2.5 - Zephyr (Bright)", "id": "Zephyr", "type": "gemini_api"},
-        {"name": "Gemini 2.5 - Fenrir (Excited)", "id": "Fenrir", "type": "gemini_api"},
-        {"name": "Gemini 2.5 - Kore (Firm)", "id": "Kore", "type": "gemini_api"}
+        # --- Gemini Voices (Mapped to Journey) ---
+        {"name": "Gemini AI - Female (Expressive)", "id": "en-US-Journey-F", "type": "google_api", "lang": "en-US"},
+        {"name": "Gemini AI - Male (Deep)", "id": "en-US-Journey-D", "type": "google_api", "lang": "en-US"},
+        {"name": "Gemini AI - Female (Soft)", "id": "en-US-Journey-O", "type": "google_api", "lang": "en-US"}
     ],
     "အင်္ဂလိပ် (English - US)": [
-        {"name": "Gemini 2.5 - Puck (Upbeat)", "id": "Puck", "type": "gemini_api"},
-        {"name": "Gemini 2.5 - Zephyr (Bright)", "id": "Zephyr", "type": "gemini_api"},
+        {"name": "Gemini AI - Female (Expressive)", "id": "en-US-Journey-F", "type": "google_api", "lang": "en-US"},
+        {"name": "Gemini AI - Male (Deep)", "id": "en-US-Journey-D", "type": "google_api", "lang": "en-US"},
         {"name": "Edge - Female (Aria)", "id": "en-US-AriaNeural", "type": "edge"},
         {"name": "Edge - Male (Christopher)", "id": "en-US-ChristopherNeural", "type": "edge"}
     ]
@@ -75,6 +72,10 @@ voice_options = VOICE_DATA[selected_language]
 voice_names = [v["name"] for v in voice_options]
 selected_voice_name = st.selectbox("အသံ (Voice)", voice_names)
 selected_voice_data = next(item for item in voice_options if item["name"] == selected_voice_name)
+
+# Warning if using English AI for Myanmar
+if selected_language == "မြန်မာ (Myanmar)" and selected_voice_data["type"] == "google_api":
+    st.warning("⚠️ English AI ကို မြန်မာစာ ဖတ်ခိုင်းနေပါသည်။ 'Burglish' (ဥပမာ: Mingalarpar) ရိုက်လျှင် ပိုကောင်းပါသည်။")
 
 # Speed Slider (Edge Only)
 if selected_voice_data["type"] == "edge":
@@ -94,37 +95,44 @@ async def generate_edge_tts(text, voice, rate_str):
     await communicate.save(tmp_path)
     return tmp_path
 
-# 2. Gemini API (Direct Request via OpenAI-Compatible Endpoint)
-# ဒီ Function က AI Studio က အသံတွေကို တိုက်ရိုက်ဆွဲထုတ်ပေးပါမယ်
-def generate_gemini_api(text, voice_id):
+# 2. Google REST API (Using API Key)
+# ဒီနည်းက 404 မဖြစ်တော့ပါဘူး (Official Endpoint)
+def generate_google_api(text, voice_id, lang_code):
     if "gemini_api_key" not in st.secrets:
-        return None, "Gemini API Key မရှိပါ။ secrets.toml တွင် ထည့်ပေးပါ။"
+        return None, "API Key ပျောက်နေပါသည်။ secrets.toml ကို စစ်ပါ။"
     
     api_key = st.secrets["gemini_api_key"]
-    # Google ၏ Speech Endpoint (OpenAI Compatible)
-    url = "https://generativelanguage.googleapis.com/v1beta/openai/audio/speech"
+    # Standard Google Cloud TTS Endpoint
+    url = f"https://texttospeech.googleapis.com/v1beta1/text:synthesize?key={api_key}"
     
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
+    headers = {"Content-Type": "application/json"}
     
     data = {
-        "model": "gemini-2.0-flash", # AI Studio သုံး Model
-        "input": text,
-        "voice": voice_id # Puck, Zephyr, etc.
+        "input": {"text": text},
+        "voice": {
+            "languageCode": lang_code,
+            "name": voice_id
+        },
+        "audioConfig": {
+            "audioEncoding": "MP3"
+        }
     }
     
     try:
         response = requests.post(url, headers=headers, json=data)
         
         if response.status_code == 200:
+            # Google returns base64 audio content
+            response_json = response.json()
+            import base64
+            audio_content = base64.b64decode(response_json['audioContent'])
+            
             with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_file:
-                tmp_file.write(response.content)
+                tmp_file.write(audio_content)
                 tmp_path = tmp_file.name
             return tmp_path, None
         else:
-            return None, f"API Error: {response.status_code} - {response.text}"
+            return None, f"Google API Error ({response.status_code}): {response.text}"
             
     except Exception as e:
         return None, str(e)
@@ -148,11 +156,12 @@ if st.button("Generate Audio", type="primary"):
                     audio_path = asyncio.run(generate_edge_tts(text_input, selected_voice_data["id"], rate))
                 except Exception as e: err = str(e)
             
-            # Type B: Gemini API (AI Studio Voices)
-            elif selected_voice_data["type"] == "gemini_api":
-                audio_path, err = generate_gemini_api(
+            # Type B: Google API
+            elif selected_voice_data["type"] == "google_api":
+                audio_path, err = generate_google_api(
                     text_input, 
-                    selected_voice_data["id"]
+                    selected_voice_data["id"],
+                    selected_voice_data["lang"]
                 )
 
             if err: st.error(err)
