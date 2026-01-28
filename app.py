@@ -1,75 +1,34 @@
 import streamlit as st
 import requests
-import os
 
-# 1. Page Config
-st.set_page_config(page_title="Gemini 2.0 Only", page_icon="⚡", layout="centered")
+st.set_page_config(page_title="Debug Mode", page_icon="🔧")
 
-# --- Authentication ---
-if 'logged_in' not in st.session_state:
-    st.session_state['logged_in'] = False
+st.title("🔧 Error ရှာဖွေရေး (Debug Mode)")
+st.info("မိတ်ဆွေ၏ Google Cloud Setting များ မှန်ကန်ပါသည်။ Code တွင်းရှိ Model Name ကို စစ်ဆေးနေပါသည်။")
 
-def check_login():
-    user = st.session_state.get('input_username', '')
-    pwd = st.session_state.get('input_password', '')
-    try:
-        if "credentials" in st.secrets and \
-           user == st.secrets["credentials"]["username"] and \
-           pwd == st.secrets["credentials"]["password"]:
-            st.session_state['logged_in'] = True
-        else:
-            st.error("Login Failed!")
-    except:
-        st.error("Secrets Error")
-
-if not st.session_state['logged_in']:
-    st.title("🔐 Login")
-    st.text_input("Username", key="input_username")
-    st.text_input("Password", type="password", key="input_password")
-    st.button("Login", on_click=check_login)
+# --- Check Key ---
+if "gemini_api_key" in st.secrets:
+    api_key = st.secrets["gemini_api_key"]
+    st.success(f"✅ API Key တွေ့ရှိပါသည် (Key အစ: {api_key[:5]}...)")
+else:
+    st.error("❌ API Key မတွေ့ပါ။ secrets.toml ကို စစ်ဆေးပါ။")
     st.stop()
 
-# ==========================================
-# Main App
-# ==========================================
+# --- Inputs ---
+text = st.text_input("စမ်းသပ်ရန် စာရိုက်ပါ (English/Myanmar):", "Mingalarpar")
 
-st.title("⚡ Gemini 2.0 TTS (Pure)")
-st.caption("Direct connection to AI Studio (No Edge TTS)")
+# Model နာမည်အမျိုးမျိုးကို စမ်းကြည့်ရန် Dropdown
+# (တစ်ခုမရရင် နောက်တစ်ခု ပြောင်းရွေးပြီး Test နှိပ်ကြည့်ပါ)
+model_options = [
+    "gemini-2.0-flash",       # Stable
+    "gemini-2.0-flash-exp",   # Experimental (AI Studio)
+    "gemini-1.5-flash"        # Older version
+]
+model = st.selectbox("Model ရွေးပါ:", model_options)
+voice = st.selectbox("Voice ရွေးပါ:", ["Puck", "Charon", "Zephyr", "Kore"])
 
-if st.button("Logout"):
-    st.session_state['logged_in'] = False
-    st.rerun()
-
-# --- Configuration ---
-
-# 1. Models (404 Error တက်ရင် Model ပြောင်းစမ်းလို့ရအောင် ထည့်ပေးထားပါတယ်)
-MODELS = ["gemini-2.0-flash", "gemini-2.0-flash-exp"]
-selected_model = st.selectbox("Model", MODELS)
-
-# 2. Voices (AI Studio Voices)
-VOICES = {
-    "Puck (Upbeat)": "Puck",
-    "Charon (Deep)": "Charon",
-    "Zephyr (Bright)": "Zephyr",
-    "Fenrir (Excited)": "Fenrir",
-    "Aoede (Soft)": "Aoede",
-    "Kore (Firm)": "Kore",
-}
-selected_voice_name = st.selectbox("Voice", list(VOICES.keys()))
-selected_voice_id = VOICES[selected_voice_name]
-
-text_input = st.text_area("စာရိုက်ထည့်ပါ (Myanmar / English):", height=200)
-
-# --- Functions ---
-
-def generate_gemini_audio(text, voice_id, model_name):
-    # 1. API Key Check
-    if "gemini_api_key" not in st.secrets:
-        return None, "API Key မရှိပါ! secrets.toml မှာ gemini_api_key ထည့်ပေးပါ။"
-    
-    api_key = st.secrets["gemini_api_key"]
-    
-    # 2. Endpoint (OpenAI Compatible)
+if st.button("Test Connection"):
+    # OpenAI-Compatible Endpoint for Audio
     url = "https://generativelanguage.googleapis.com/v1beta/openai/audio/speech"
     
     headers = {
@@ -78,48 +37,23 @@ def generate_gemini_audio(text, voice_id, model_name):
     }
     
     data = {
-        "model": model_name,
+        "model": model,
         "input": text,
-        "voice": voice_id,
-        "response_format": "mp3"
+        "voice": voice
     }
     
-    try:
-        # 3. Request
-        response = requests.post(url, headers=headers, json=data)
-        
-        if response.status_code == 200:
-            return response.content, None
-        else:
-            # Error Detail
-            return None, f"Error {response.status_code}: {response.text}"
+    with st.spinner(f"Testing {model}..."):
+        try:
+            response = requests.post(url, headers=headers, json=data)
             
-    except Exception as e:
-        return None, str(e)
-
-# --- Generate Logic ---
-
-if st.button("Generate Audio", type="primary"):
-    if not text_input.strip():
-        st.warning("စာရိုက်ထည့်ပါ")
-    else:
-        with st.spinner(f"Gemini ({selected_voice_id}) is reading..."):
-            
-            audio_content, error = generate_gemini_audio(
-                text_input, 
-                selected_voice_id,
-                selected_model
-            )
-
-            if error:
-                st.error("အဆင်မပြေပါ:")
-                st.code(error) # Error အတိအကျကို ပြပေးပါမယ်
+            # --- Result Analysis ---
+            if response.status_code == 200:
+                st.success(f"🎉 အောင်မြင်ပါတယ်! ({model} is working)")
+                st.audio(response.content, format="audio/mp3")
+            else:
+                st.error(f"❌ Error: {response.status_code}")
+                # Google က ပြန်ပို့လိုက်တဲ့ Error စာသားအပြည့်အစုံ
+                st.json(response.json()) 
                 
-                # 404 အကြံပြုချက်
-                if "404" in str(error):
-                    st.info("💡 Tip: 'Model' နေရာမှာ 'gemini-2.0-flash-exp' ကို ပြောင်းရွေးပြီး ပြန်စမ်းကြည့်ပါ။")
-            
-            elif audio_content:
-                st.success("Success!")
-                st.audio(audio_content, format="audio/mp3")
-                st.download_button("Download MP3", audio_content, "audio.mp3", "audio/mp3")
+        except Exception as e:
+            st.error(f"System Error: {str(e)}")
