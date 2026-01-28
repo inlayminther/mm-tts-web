@@ -6,9 +6,10 @@ import os
 import requests
 import json
 import base64
+import re
 
 # 1. Page Config
-st.set_page_config(page_title="Gemini TTS (Myanmar Fixed)", page_icon="🇲🇲", layout="centered")
+st.set_page_config(page_title="Gemini TTS (Final Fix)", page_icon="✅", layout="centered")
 
 # --- Authentication ---
 if 'logged_in' not in st.session_state:
@@ -38,8 +39,8 @@ if not st.session_state['logged_in']:
 # Main App
 # ==========================================
 
-st.title("🇲🇲 Gemini TTS (Myanmar Fixed)")
-st.caption("Supports long Myanmar text (Auto-split enabled)")
+st.title("✅ Gemini TTS (Sentence Fix)")
+st.caption("Splits long sentences automatically to avoid API errors.")
 
 if st.button("Logout"):
     st.session_state['logged_in'] = False
@@ -81,25 +82,40 @@ text_input = st.text_area("စာရိုက်ထည့်ပါ:", height=200
 
 # --- Functions ---
 
-# Helper: Split text safely for Myanmar (Bytes vs Chars fix)
-# 500 characters limit is safe (500 chars * 3 bytes = 1500 bytes < 5000 limit)
-def split_text_safe(text, max_length=500):
+# Helper: Aggressive splitter for Sentence Length Error
+# Reduces chunk size to 200 chars and prioritizes punctuation
+def split_text_aggressive(text, max_length=200):
     chunks = []
     while len(text) > max_length:
-        # Try splitting by Myanmar punctuation first (။)
+        # Priority 1: Burmese Punctuation (။)
         split_at = text.rfind('။', 0, max_length)
+        
+        # Priority 2: Burmese Comma (၊)
         if split_at == -1:
-            # Try splitting by space
+            split_at = text.rfind('၊', 0, max_length)
+            
+        # Priority 3: English Sentence Enders (. ? !)
+        if split_at == -1:
+            # Simple regex search for last punctuation
+            match = re.search(r'[.?!]', text[:max_length][::-1])
+            if match:
+                split_at = max_length - match.start() - 1
+
+        # Priority 4: Space
+        if split_at == -1:
             split_at = text.rfind(' ', 0, max_length)
         
-        if split_at == -1:  # No good split point found, hard cut
+        # Fallback: Hard cut if no punctuation found
+        if split_at == -1:
             split_at = max_length
         else:
-            split_at += 1 # Include the punctuation/space
+            split_at += 1 # Include the punctuation
             
         chunks.append(text[:split_at])
         text = text[split_at:]
-    chunks.append(text)
+    
+    if text:
+        chunks.append(text)
     return chunks
 
 # 1. Edge TTS
@@ -119,8 +135,8 @@ def generate_google_api(text, voice_id, lang_code):
     url = f"https://texttospeech.googleapis.com/v1beta1/text:synthesize?key={api_key}"
     headers = {"Content-Type": "application/json"}
 
-    # Step 1: Split Text (Using safer limit: 500 chars)
-    chunks = split_text_safe(text)
+    # Step 1: Split Text (Using aggressive limit: 200 chars)
+    chunks = split_text_aggressive(text)
     combined_audio = b""
     
     # Step 2: Loop chunks
@@ -139,7 +155,8 @@ def generate_google_api(text, voice_id, lang_code):
                 response_json = response.json()
                 combined_audio += base64.b64decode(response_json['audioContent'])
             else:
-                return None, f"API Error in part {i+1}: {response.text}"
+                # If chunk is still rejected, try one generic fallback
+                return None, f"Chunk {i+1} Error: {response.json().get('error', {}).get('message', 'Unknown Error')}"
         except Exception as e:
             return None, str(e)
             
@@ -158,7 +175,7 @@ if st.button("Generate Audio", type="primary"):
     if not text_input.strip():
         st.warning("စာရိုက်ထည့်ပါ")
     else:
-        with st.spinner("Processing large text..."):
+        with st.spinner("Processing text..."):
             audio_path = None
             err = None
             
