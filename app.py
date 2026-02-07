@@ -7,7 +7,7 @@ import os
 st.set_page_config(page_title="Secure Edge TTS", page_icon="🔒", layout="centered")
 
 # ==========================================
-# Helper Class: Smart SRT Maker
+# Helper Class: Smart SRT Maker (Fixed)
 # ==========================================
 class CustomSubMaker:
     def __init__(self):
@@ -29,7 +29,8 @@ class CustomSubMaker:
         # 1. အကယ်၍ Timing Data (Events) ပါလာလျှင် (English အတွက်)
         if self.events:
             srt_output = ""
-            forHZ, event in enumerate(self.events, 1):
+            # --- ပြင်ဆင်လိုက်သော နေရာ (Space ခြားလိုက်ပါပြီ) ---
+            for index, event in enumerate(self.events, 1):
                 # EdgeTTS offset is in 100ns units (1e-7 seconds)
                 start_seconds = event['offset'] / 10_000_000
                 duration_seconds = event['duration'] / 10_000_000
@@ -39,7 +40,7 @@ class CustomSubMaker:
                 end_time = self._format_time(end_seconds)
                 text = event['text']
                 
-                srt_output += f"{forHZ}\n"
+                srt_output += f"{index}\n"
                 srt_output += f"{start_time} --> {end_time}\n"
                 srt_output += f"{text}\n\n"
             return srt_output
@@ -49,7 +50,10 @@ class CustomSubMaker:
         else:
             # EdgeTTS mp3 usually approx 16000 bytes per second (128kbps estimate)
             # ဒါက အတိအကျမဟုတ်ပေမယ့် SRT ထွက်ဖို့ လုံလောက်ပါတယ်
-            estimated_seconds = audio_len_bytes / 16000 
+            if audio_len_bytes == 0:
+                estimated_seconds = 5 # Default duration if audio is empty
+            else:
+                estimated_seconds = audio_len_bytes / 16000 
             
             start_time = self._format_time(0)
             end_time = self._format_time(estimated_seconds)
