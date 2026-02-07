@@ -52,9 +52,12 @@ if st.button("Log out 🔒"):
     st.session_state['logged_in'] = False
     st.rerun() # Refresh ပြန်လုပ်ပြီး Login စာမျက်နှာပြန်ပို့
 
-# --- Session State for Audio ---
+# --- Session State for Audio & SRT ---
 if 'audio_bytes' not in st.session_state:
     st.session_state['audio_bytes'] = None
+# (NEW) SRT အတွက် Session State ထပ်ဖြည့်သည်
+if 'srt_content' not in st.session_state:
+    st.session_state['srt_content'] = None
 
 # --- Voice Settings ---
 language = st.radio("ဘာသာစကား (Language):", ["မြန်မာ (Myanmar)", "အင်္ဂလိပ် (English)"], horizontal=True)
@@ -93,12 +96,19 @@ async def generate_audio(text, voice, speed_val):
     
     communicate = edge_tts.Communicate(text, voice, rate=rate_str)
     
+    # (NEW) SubMaker ကို ခေါ်သုံးသည်
+    submaker = edge_tts.SubMaker()
+    
     audio_data = b""
     async for chunk in communicate.stream():
         if chunk["type"] == "audio":
             audio_data += chunk["data"]
+        # (NEW) WordBoundary (စကားလုံးဖြတ်ရာ) များကို ဖမ်းယူပြီး Subtitle တည်ဆောက်သည်
+        elif chunk["type"] == "WordBoundary":
+            submaker.feed(chunk)
             
-    return audio_data
+    # (NEW) Audio နှင့် SRT ကို တွဲပြီး return ပြန်သည်
+    return audio_data, submaker.generate_subs()
 
 # Generate Button
 if st.button("Generate Audio 🔊", type="primary"):
@@ -107,20 +117,37 @@ if st.button("Generate Audio 🔊", type="primary"):
     else:
         with st.spinner("Generating..."):
             try:
-                audio_data = asyncio.run(generate_audio(text_input, selected_voice_id, speed))
+                # (NEW) Return ၂ ခု ပြန်လက်ခံသည်
+                audio_data, srt_content = asyncio.run(generate_audio(text_input, selected_voice_id, speed))
                 st.session_state['audio_bytes'] = audio_data
+                st.session_state['srt_content'] = srt_content
             except Exception as e:
                 st.error(f"Error: {e}")
 
 # --- Display Result ---
 if st.session_state['audio_bytes']:
     st.markdown("---")
-    st.success("Success! အသံဖိုင် ရပါပြီ။")
+    st.success("Success! အသံဖိုင် နှင့် စာတန်းထိုး ရပါပြီ။")
     st.audio(st.session_state['audio_bytes'], format="audio/mp3")
-    st.download_button(
-        label="Download MP3 📥",
-        data=st.session_state['audio_bytes'],
-        file_name="tts_audio.mp3",
-        mime="audio/mp3",
-        key="download_btn"
-    )
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.download_button(
+            label="Download MP3 📥",
+            data=st.session_state['audio_bytes'],
+            file_name="tts_audio.mp3",
+            mime="audio/mp3",
+            key="download_btn_mp3"
+        )
+        
+    with col2:
+        # (NEW) SRT Download Button
+        if st.session_state['srt_content']:
+            st.download_button(
+                label="Download SRT 📝",
+                data=st.session_state['srt_content'],
+                file_name="tts_subtitle.srt",
+                mime="text/plain",
+                key="download_btn_srt"
+            )
