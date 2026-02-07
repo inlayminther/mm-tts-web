@@ -55,7 +55,8 @@ if st.button("Log out 🔒"):
 # --- Session State for Audio & SRT ---
 if 'audio_bytes' not in st.session_state:
     st.session_state['audio_bytes'] = None
-# (NEW) SRT အတွက် Session State ထပ်ဖြည့်သည်
+
+# (NEW) SRT အတွက် Session State
 if 'srt_content' not in st.session_state:
     st.session_state['srt_content'] = None
 
@@ -107,8 +108,8 @@ async def generate_audio(text, voice, speed_val):
         elif chunk["type"] == "WordBoundary":
             submaker.feed(chunk)
             
-    # (NEW) Audio နှင့် SRT ကို တွဲပြီး return ပြန်သည်
-    return audio_data, submaker.generate_subs()
+    # (FIXED) generate_subs() အစား generate_srt() ကို ပြောင်းလိုက်ပါသည်
+    return audio_data, submaker.generate_srt()
 
 # Generate Button
 if st.button("Generate Audio 🔊", type="primary"):
