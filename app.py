@@ -7,6 +7,40 @@ import os
 st.set_page_config(page_title="Secure Edge TTS", page_icon="🔒", layout="centered")
 
 # ==========================================
+# Helper Class: Custom SRT Maker (Error Fix)
+# ==========================================
+# Library အပေါ်မမှီခိုဘဲ ကိုယ်တိုင်ရေးထားသော SRT Generator
+class CustomSubMaker:
+    def __init__(self):
+        self.events = []
+
+    def feed(self, chunk):
+        # WordBoundary data များကို လက်ခံသိမ်းဆည်းခြင်း
+        self.events.append(chunk)
+
+    def _format_time(self, offset):
+        # 100ns units (EdgeTTS format) ကို SRT Time format (HH:MM:SS,mmm) သို့ ပြောင်းခြင်း
+        total_seconds = offset / 10_000_000
+        hours = int(total_seconds // 3600)
+        minutes = int((total_seconds % 3600) // 60)
+        seconds = int(total_seconds % 60)
+        milliseconds = int((total_seconds - int(total_seconds)) * 1000)
+        return f"{hours:02}:{minutes:02}:{seconds:02},{milliseconds:03}"
+
+    def generate_srt(self):
+        # သိမ်းထားသော data များကို SRT စာသားအဖြစ် ပြောင်းလဲခြင်း
+        srt_output = ""
+        for index, event in enumerate(self.events, 1):
+            start_time = self._format_time(event['offset'])
+            end_time = self._format_time(event['offset'] + event['duration'])
+            text = event['text']
+            
+            srt_output += f"{index}\n"
+            srt_output += f"{start_time} --> {end_time}\n"
+            srt_output += f"{text}\n\n"
+        return srt_output
+
+# ==========================================
 # Authentication (Login System)
 # ==========================================
 
@@ -55,8 +89,6 @@ if st.button("Log out 🔒"):
 # --- Session State for Audio & SRT ---
 if 'audio_bytes' not in st.session_state:
     st.session_state['audio_bytes'] = None
-
-# (NEW) SRT အတွက် Session State
 if 'srt_content' not in st.session_state:
     st.session_state['srt_content'] = None
 
@@ -97,18 +129,18 @@ async def generate_audio(text, voice, speed_val):
     
     communicate = edge_tts.Communicate(text, voice, rate=rate_str)
     
-    # (NEW) SubMaker ကို ခေါ်သုံးသည်
-    submaker = edge_tts.SubMaker()
+    # (CHANGED) Library အစား Custom Class ကို သုံးသည်
+    submaker = CustomSubMaker()
     
     audio_data = b""
     async for chunk in communicate.stream():
         if chunk["type"] == "audio":
             audio_data += chunk["data"]
-        # (NEW) WordBoundary (စကားလုံးဖြတ်ရာ) များကို ဖမ်းယူပြီး Subtitle တည်ဆောက်သည်
+        # WordBoundary တွေ့ရင် CustomSubMaker ထဲ ထည့်သည်
         elif chunk["type"] == "WordBoundary":
             submaker.feed(chunk)
             
-    # (FIXED) generate_subs() အစား generate_srt() ကို ပြောင်းလိုက်ပါသည်
+    # Custom class ရဲ့ generate_srt ကို ခေါ်သည်
     return audio_data, submaker.generate_srt()
 
 # Generate Button
@@ -118,7 +150,6 @@ if st.button("Generate Audio 🔊", type="primary"):
     else:
         with st.spinner("Generating..."):
             try:
-                # (NEW) Return ၂ ခု ပြန်လက်ခံသည်
                 audio_data, srt_content = asyncio.run(generate_audio(text_input, selected_voice_id, speed))
                 st.session_state['audio_bytes'] = audio_data
                 st.session_state['srt_content'] = srt_content
@@ -143,7 +174,7 @@ if st.session_state['audio_bytes']:
         )
         
     with col2:
-        # (NEW) SRT Download Button
+        # SRT Download Button
         if st.session_state['srt_content']:
             st.download_button(
                 label="Download SRT 📝",
